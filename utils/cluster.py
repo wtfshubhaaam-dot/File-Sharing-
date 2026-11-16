@@ -24,8 +24,11 @@ import asyncio
 import datetime as dt
 import hashlib
 import hmac
+import html
 import logging
 import math
+import os
+import re
 import time
 from collections import deque
 
@@ -59,6 +62,27 @@ _session = None
 _sem = None
 _seen_ids: deque = deque(maxlen=4000)
 _seen_set: set = set()
+
+
+# ----------------------------------------------------------------------------- server names
+_NAMES = [("⚡", "Falcon"), ("🔥", "Phoenix"), ("🌩", "Thunder"), ("🐉", "Dragon"), ("🦅", "Eagle"),
+          ("🐺", "Wolf"), ("🚀", "Rocket"), ("💎", "Diamond"), ("🌊", "Tsunami"), ("🛡", "Titan")]
+
+
+def _default_name(node_id: str) -> str:
+    m = re.search(r"(\d+)", node_id or "")
+    i = (int(m.group(1)) - 1) if m else sum(ord(c) for c in node_id or "x")
+    emoji, name = _NAMES[i % len(_NAMES)]
+    return f"{emoji} {name}"
+
+
+NODE_LABEL = config.NODE_NAME or _default_name(config.NODE_ID)       # shown to users, e.g. "⚡ Falcon"
+HOST = "Render" if os.getenv("RENDER") else ("Koyeb" if os.getenv("KOYEB_APP_NAME") else "")
+
+
+def short_name(label: str) -> str:
+    """Name without the emoji, for tables."""
+    return re.sub(r"^[^\w]+", "", label or "").strip() or label
 
 
 def _derive(label: str) -> str:
@@ -159,7 +183,8 @@ def _streams() -> int:
 
 
 def self_doc() -> dict:
-    return {"url": config.BASE_URL, "role": "gateway" if IS_GATEWAY else "worker", "cap": config.NODE_CAPACITY,
+    return {"url": config.BASE_URL, "name": NODE_LABEL, "host": HOST, "role": "gateway" if IS_GATEWAY else "worker",
+            "cap": config.NODE_CAPACITY,
             "max_tasks": config.NODE_MAX_TASKS, "max_streams": config.NODE_MAX_STREAMS,
             "hb": time.time(), **local_metrics()}
 
@@ -292,7 +317,7 @@ class Router:
                 state = "HOT"
             else:
                 state = "OK"
-            rows.append({"id": nid, "state": state, "users": users, "cap": n.get("cap", 30), "tasks": n.get("tasks", 0),
+            rows.append({"id": nid, "name": n.get("name") or nid, "host": n.get("host", ""), "state": state, "users": users, "cap": n.get("cap", 30), "tasks": n.get("tasks", 0),
                          "streams": n.get("streams", 0), "cpu": n.get("cpu", 0), "ram": n.get("ram", 0),
                          "ram_mb": n.get("ram_used_mb", 0), "ram_total": n.get("ram_total_mb", 0),
                          "load": round(100 * min(load_score(n, users), 1.0)) if ok else 0,
@@ -333,6 +358,9 @@ async def process_local(data: dict):
     update = Update.de_json(data, _app.bot)
     if update is None:
         return
+    user_id, kind = _update_user(data)
+    if user_id is not None and kind in ("message", "callback_query"):
+        _touch(user_id)
     global _sem
     if _sem is None:
         _sem = asyncio.Semaphore(256)
@@ -347,6 +375,68 @@ async def process_local(data: dict):
         log.exception("Update %s failed", uid)
     finally:
         live.tasks -= 1
+
+
+# ----------------------------------------------------------------------------- "connecting" animation
+_act: dict = {}          # user id -> monotonic time of his last update on THIS server
+_pending: set = set()    # users who just (re)connected to this server and have not seen the animation yet
+
+
+def _touch(uid: int):
+    now = time.monotonic()
+    last = _act.get(uid)
+    _act[uid] = now
+    if last is None or now - last > WINDOW:      # new here, or came back after being inactive
+        _pending.add(uid)
+    if len(_act) > 20000:
+        for u in [u for u, t in _act.items() if now - t > WINDOW * 2]:
+            del _act[u]
+            _pending.discard(u)
+
+
+def server_line() -> str:
+    """One line for the user: which server he is connected to ('' when not in multi-server mode)."""
+    return f"🖥 <b>Server:</b> {html.escape(NODE_LABEL)}" if ENABLED else ""
+
+
+def _frames() -> list:
+    lab = html.escape(NODE_LABEL)
+    return [
+        "📡 <b>Connecting…</b>\n\n▰▱▱▱▱▱▱▱▱▱ 10%\n<i>Scanning servers</i>",
+        "🛰 <b>Connecting…</b>\n\n▰▰▰▱▱▱▱▱▱▱ 30%\n<i>Finding the fastest route</i>",
+        "🔐 <b>Connecting…</b>\n\n▰▰▰▰▰▰▱▱▱▱ 60%\n<i>Securing the connection</i>",
+        f"⚡ <b>Connecting…</b>\n\n▰▰▰▰▰▰▰▰▱▱ 85%\n<i>Syncing with {lab}</i>",
+        f"✅ <b>Connected</b>\n\n🖥 Server: <b>{lab}</b>\n📶 Status: Online · Secure\n\n▰▰▰▰▰▰▰▰▰▰ 100%",
+    ]
+
+
+async def _delete_later(bot, chat_id: int, message_id: int, after: float):
+    await asyncio.sleep(after)
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
+async def connect_animation(bot, chat_id: int):
+    """Shown once when a user connects (or reconnects) to this server. Never blocks or breaks the file delivery."""
+    if not ENABLED or chat_id not in _pending:
+        return
+    _pending.discard(chat_id)
+    if _is_admin(chat_id):
+        return
+    from telegram.constants import ParseMode
+    frames = _frames()
+    try:
+        m = await bot.send_message(chat_id, frames[0], parse_mode=ParseMode.HTML)
+        for f in frames[1:]:
+            await asyncio.sleep(0.6)
+            await bot.edit_message_text(f, chat_id=chat_id, message_id=m.message_id, parse_mode=ParseMode.HTML)
+        _spawn(_delete_later(bot, chat_id, m.message_id, 8))
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.debug("Connect animation skipped: %s", type(e).__name__)
 
 
 def _http():
