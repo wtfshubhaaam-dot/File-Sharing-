@@ -20,7 +20,7 @@ from database import db
 from database.db import settings as S
 from handlers import admin
 from utils.helpers import call, is_admin, notify_owner, render_caption, retry_seconds
-from utils import ads
+from utils import ads, cluster
 from utils.membership import get_missing
 from utils.streamer import human_size, streamer
 import config
@@ -187,6 +187,7 @@ async def request_access(bot, chat_id: int, link: dict):
         if S.get("ads_enabled") and await db.used_today(chat_id) >= db.limit_value():
             await _limit_reached(bot, chat_id)                  # don't make them watch an ad for nothing
             return
+    await cluster.connect_animation(bot, chat_id)               # multi-server mode: "Connecting... Connected: <server>"
     if await ads.gate(bot, chat_id, link):                      # Mini App button sent; files follow after the ad
         return
     await deliver(bot, chat_id, link)
@@ -215,6 +216,8 @@ async def deliver(bot, chat_id: int, link: dict):
     _last_open[chat_id] = time.monotonic()             # cooldown starts after delivery finishes
 
     text = f"📊 <b>Daily limit:</b> {used}/{limit} links used today · {max(0, limit - used)} left"
+    if cluster.ENABLED:
+        text += "\n" + cluster.server_line()
     if used >= limit:
         text += "\n\n🚫 Limit reached. Come back tomorrow (resets at 12:00 AM IST)."
     await call(bot.send_message, chat_id, text, parse_mode=ParseMode.HTML)

@@ -101,7 +101,7 @@ async def _summary(update):
     snap = C.router.snapshot()
     rows = [["Node", "Users", "Task", "Str", "CPU", "RAM", "State"]]
     for r in snap["nodes"]:
-        name = r["id"] + ("*" if r["gateway"] else "")
+        name = C.short_name(r["name"])[:8] + ("*" if r["gateway"] else "")
         rows.append([name, f"{r['users']}/{r['cap']}", r["tasks"], r["streams"], f"{r['cpu']:.0f}%",
                      f"{r['ram']:.0f}%", r["state"]])
     t = _ist_today()
@@ -111,7 +111,9 @@ async def _summary(update):
     text = (f"🌐 <b>Servers</b> · {snap['up']}/{len(snap['nodes'])} online\n"
             f"<i>Active = used the bot in the last {config.ACTIVE_WINDOW // 60} min</i>\n\n"
             f"⚡ <b>Now:</b> {snap['active']} active / {snap['capacity']} capacity ({pct}%)\n\n"
-            + _table(rows, [6, 8, 5, 4, 5, 5, 6])
+            + _table(rows, [10, 8, 5, 4, 5, 5, 6])
+            + "\n".join(f"{html.escape(r['name'])} = {r['id']}" + (f" · {r['host']}" if r["host"] else "")
+                         for r in snap["nodes"]) + "\n"
             + "<i>* = gateway · Task = requests being processed · Str = live Stream/Download viewers</i>\n\n"
             f"📈 <b>Peak today:</b> {_fmt_peak(_peak_doc(today_docs))}\n"
             f"📆 <b>Peak 7 days:</b> {_fmt_peak(_peak_doc(docs))}")
@@ -224,8 +226,9 @@ async def _scaling(update):
 
 
 def _how_to_add(have: int) -> str:
-    return ("<b>Add a server</b>\n"
-            f"1. New Koyeb account → deploy this same repo (Dockerfile).\n"
-            f"2. Same env as the others, only change: <code>NODE_ID=n{have + 1}</code>, <code>NODE_ROLE=worker</code>, "
-            "<code>BASE_URL=</code> that app's own https URL.\n"
+    return ("<b>Add a server</b> (Koyeb or Render free)\n"
+            "1. New free account → deploy this same repo (Dockerfile).\n"
+            f"2. Same env as the others, only change: <code>NODE_ID=n{have + 1}</code>, <code>NODE_ROLE=worker</code> "
+            "(optional <code>NODE_NAME</code>). On Render the URL is detected automatically; elsewhere set "
+            "<code>BASE_URL</code> to the app's own https URL.\n"
             "3. Done. It appears here after its first heartbeat (10 s). Nothing else is restarted.")
