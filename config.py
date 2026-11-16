@@ -27,7 +27,16 @@ API_ID = int(os.getenv("API_ID", "0") or 0)
 API_HASH = os.getenv("API_HASH", "")
 
 # Public https URL of this deployment, no trailing slash (e.g. https://myapp.koyeb.app). Needed for Stream/Download links.
-BASE_URL = os.getenv("BASE_URL", "").strip().rstrip("/")
+def _auto_base_url() -> str:
+    """Render and Koyeb tell the app its own public address; used only when BASE_URL is not set."""
+    if os.getenv("RENDER_EXTERNAL_URL"):
+        return os.getenv("RENDER_EXTERNAL_URL", "").strip()
+    if os.getenv("KOYEB_PUBLIC_DOMAIN"):
+        return "https://" + os.getenv("KOYEB_PUBLIC_DOMAIN", "").strip()
+    return ""
+
+
+BASE_URL = (os.getenv("BASE_URL", "").strip() or _auto_base_url()).rstrip("/")
 
 # Cloudflare Worker that makes every share link permanent (see cloudflare-worker/worker.js). Optional.
 WORKER_URL = os.getenv("WORKER_URL", "").strip().rstrip("/")
@@ -53,6 +62,7 @@ MONGO_LIMIT_MB = float(os.getenv("MONGO_LIMIT_MB", "512"))
 # ---------------------------------------------------------------------------------------------------
 CLUSTER_SECRET = os.getenv("CLUSTER_SECRET", "").strip()                       # same long random text on every server
 NODE_ID = re.sub(r"[^A-Za-z0-9_-]", "", os.getenv("NODE_ID", "").strip())[:20]
+NODE_NAME = os.getenv("NODE_NAME", "").strip()[:24]                              # e.g. "🔥 Phoenix" (default: picked from NODE_ID)
 NODE_ROLE = os.getenv("NODE_ROLE", "worker").strip().lower()                     # gateway | worker
 NODE_CAPACITY = max(1, int(os.getenv("NODE_CAPACITY", "30") or 30))              # active users this server should carry
 NODE_MAX_TASKS = max(1, int(os.getenv("NODE_MAX_TASKS", "20") or 20))            # requests being processed at the same moment

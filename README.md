@@ -61,6 +61,14 @@ All servers share the same MongoDB.
 | `BASE_URL` | its own `https://...koyeb.app` | its own `https://...koyeb.app` |
 | `NODE_CAPACITY` (optional) | users per server, default 30 | same |
 
+**Server names:** every server has a name users can see (`NODE_NAME`, e.g. `🔥 Phoenix`; empty = automatic: n1 ⚡ Falcon,
+n2 🔥 Phoenix, n3 🌩 Thunder, n4 🐉 Dragon...). When a user connects (or comes back after being inactive) he sees a short
+"Connecting… → Connected: <server>" animation, and the daily-limit message shows which server he is on.
+
+**Platforms:** Koyeb and Render free plans can be mixed. Render sets `PORT` and `RENDER_EXTERNAL_URL` itself (leave `BASE_URL`
+empty there; `render.yaml` is included). Render free sleeps after 15 min without traffic: the gateway pings every worker
+every 4 min, so only the gateway needs the UptimeRobot monitor. Put the gateway on the most stable platform.
+
 Koyeb: Docker service, port 8080, health check path `/health`. Deploy the **gateway first**, then the workers.
 A new worker shows up in Panel -> **Servers** after about 10 seconds; no other server is restarted.
 Add a free UptimeRobot monitor on `<gateway BASE_URL>/health` (every 5 min): the gateway then keeps the workers awake too.

@@ -1,0 +1,29 @@
+# Render Blueprint for ONE worker server (free plan). Duplicate the block for more servers, changing name / NODE_ID.
+# Render sets PORT and RENDER_EXTERNAL_URL itself. Fill the "sync: false" values in the Render dashboard.
+services:
+  - type: web
+    name: filestorebot-n2
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: DB_NAME
+        value: filesharebot
+      - key: CLUSTER_SECRET
+        sync: false
+      - key: NODE_ID
+        value: n2
+      - key: NODE_ROLE
+        value: worker
+      - key: NODE_CAPACITY
+        value: "30"
